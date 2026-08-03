@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Star, Plus, TrendingUp, TrendingDown, Minus, Sparkles, X, Loader2, ChevronDown, Users, LayoutGrid, Rss, Menu } from "lucide-react";
+import * as storage from "./storage";
 
 const EVA = { navy: "#0a0f2c", navyDeep: "#060a1f", white: "#ffffff", red: "#e5231b" };
 const SURFACE = { bg: "#f3f4f7", card: "#ffffff", border: "#e7e8ee", text: "#14172b", sub: "#6b7085" };
@@ -16,32 +17,8 @@ const METRIC_DEFS = [
   { key: "postFreq", label: "Posts / Week" },
 ];
 
-const uid = () => Math.random().toString(36).slice(2, 10);
-
 function emptyMetrics() {
   return METRIC_DEFS.reduce((acc, m) => ({ ...acc, [m.key]: "" }), {});
-}
-
-function defaultClient(name, primary, accent, platforms = ["Facebook", "Instagram"]) {
-  const metrics = {};
-  platforms.forEach((p) => (metrics[p] = emptyMetrics()));
-  return {
-    id: uid(),
-    name,
-    primary,
-    accent,
-    platforms,
-    weeks: [{ id: uid(), label: "Week 1", metrics }],
-    dailyLog: [],
-    inspiration: [],
-    trends: "",
-    contentIdeas: "",
-    comparisonReport: "",
-  };
-}
-
-function seedClients() {
-  return [defaultClient("Suite 53 Events & Rentals", "#0a0a0a", "#c9a130")];
 }
 
 function pctChange(cur, prev) {
@@ -129,11 +106,12 @@ function Card({ children, className = "", style = {} }) {
 }
 
 export default function App() {
-  const [clients, setClients] = useState(seedClients());
+  const [clients, setClients] = useState([]);
   const [activeClientId, setActiveClientId] = useState(null);
   const [view, setView] = useState("table");
   const [activePlatform, setActivePlatform] = useState("Facebook");
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(null);
   const [showClientMenu, setShowClientMenu] = useState(false);
   const [showNewClient, setShowNewClient] = useState(false);
   const [newClientForm, setNewClientForm] = useState({ name: "", primary: "#0a0f2c", accent: "#e5231b" });
@@ -142,24 +120,25 @@ export default function App() {
   const [dailyForm, setDailyForm] = useState({ platform: "Facebook", ...emptyMetrics() });
   const [inspForm, setInspForm] = useState({ link: "", likes: "", comments: "", reposts: "", caption: "" });
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const saveTimer = useRef(null);
+  const saveTimers = useRef({});
 
   useEffect(() => {
     (async () => {
       try {
-        const result = await window.storage.get("eva-clients", false);
-        if (result && result.value) {
-          const parsed = JSON.parse(result.value);
-          if (Array.isArray(parsed) && parsed.length) {
-            setClients(parsed);
-            setActiveClientId(parsed[0].id);
-            setActivePlatform(parsed[0].platforms[0]);
-            setLoaded(true);
-            return;
-          }
+        let loadedClients = await storage.fetchClients();
+        if (!loadedClients.length) {
+          const seeded = await storage.createClient({ name: "Suite 53 Events & Rentals", primary: "#0a0a0a", accent: "#c9a130" });
+          loadedClients = [seeded];
         }
-      } catch (e) {}
-      setLoaded(true);
+        setClients(loadedClients);
+        setActiveClientId(loadedClients[0].id);
+        setActivePlatform(loadedClients[0].platforms[0]);
+      } catch (e) {
+        console.error(e);
+        setLoadError(e.message || "Failed to load data from Supabase.");
+      } finally {
+        setLoaded(true);
+      }
     })();
   }, []);
 
@@ -170,52 +149,49 @@ export default function App() {
     }
   }, [clients, activeClientId]);
 
-  useEffect(() => {
-    if (!loaded) return;
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => {
-      try { await window.storage.set("eva-clients", JSON.stringify(clients), false); } catch (e) { console.error(e); }
-    }, 500);
-    return () => clearTimeout(saveTimer.current);
-  }, [clients, loaded]);
-
   const client = clients.find((c) => c.id === activeClientId) || clients[0];
 
   function updateClient(id, fn) {
     setClients((prev) => prev.map((c) => (c.id === id ? fn(structuredClone(c)) : c)));
   }
 
-  function addWeek() {
-    updateClient(client.id, (c) => {
-      const metrics = {};
-      c.platforms.forEach((p) => (metrics[p] = emptyMetrics()));
-      c.weeks.push({ id: uid(), label: `Week ${c.weeks.length + 1}`, metrics });
-      return c;
-    });
+  function debouncedSave(key, fn, delay = 600) {
+    if (saveTimers.current[key]) clearTimeout(saveTimers.current[key]);
+    saveTimers.current[key] = setTimeout(async () => {
+      try { await fn(); } catch (e) { console.error(e); }
+    }, delay);
+  }
+
+  async function addWeek() {
+    const position = client.weeks.length;
+    const week = await storage.addWeek(client.id, position, client.platforms);
+    updateClient(client.id, (c) => { c.weeks.push(week); return c; });
   }
 
   function setMetric(weekId, platform, key, value) {
     updateClient(client.id, (c) => {
       const w = c.weeks.find((w) => w.id === weekId);
-      w.metrics[platform][key] = value;
+      w.metrics[platform] = { ...w.metrics[platform], [key]: value };
       return c;
     });
+    debouncedSave(`metric-${weekId}-${platform}-${key}`, () => storage.setMetric(weekId, platform, key, value));
   }
 
-  function addPlatform(name) {
-    if (!name) return;
+  async function addPlatform(name) {
+    if (!name || client.platforms.includes(name)) return;
+    const platforms = [...client.platforms, name];
+    await storage.setPlatforms(client.id, platforms);
     updateClient(client.id, (c) => {
-      if (c.platforms.includes(name)) return c;
-      c.platforms.push(name);
-      c.weeks.forEach((w) => (w.metrics[name] = emptyMetrics()));
+      c.platforms = platforms;
+      c.weeks.forEach((w) => (w.metrics[name] = {}));
       return c;
     });
     setActivePlatform(name);
   }
 
-  function createClient() {
+  async function createClient() {
     if (!newClientForm.name.trim()) return;
-    const nc = defaultClient(newClientForm.name.trim(), newClientForm.primary, newClientForm.accent);
+    const nc = await storage.createClient({ name: newClientForm.name.trim(), primary: newClientForm.primary, accent: newClientForm.accent });
     setClients((prev) => [...prev, nc]);
     setActiveClientId(nc.id);
     setActivePlatform(nc.platforms[0]);
@@ -223,29 +199,47 @@ export default function App() {
     setNewClientForm({ name: "", primary: "#0a0f2c", accent: "#e5231b" });
   }
 
-  function pushDailyToCurrentWeek() {
+  async function pushDailyToCurrentWeek() {
+    const week = client.weeks[client.weeks.length - 1];
+    const platform = dailyForm.platform;
+    const metricsPayload = { ...dailyForm };
+    delete metricsPayload.platform;
+    const entry = await storage.logDailyEntry(client.id, platform, metricsPayload);
+
+    const entries = [...client.dailyLog.filter((e) => e.platform === platform), entry];
+    const totals = {};
+    METRIC_DEFS.forEach((m) => {
+      const sum = entries.reduce((s, e) => s + (parseFloat(e[m.key]) || 0), 0);
+      if (sum) totals[m.key] = sum;
+    });
+    await storage.setWeekMetricTotals(week.id, platform, totals);
+
     updateClient(client.id, (c) => {
-      const week = c.weeks[c.weeks.length - 1];
-      const entries = c.dailyLog.filter((e) => e.platform === dailyForm.platform);
-      const all = [...entries, dailyForm];
-      METRIC_DEFS.forEach((m) => {
-        const sum = all.reduce((s, e) => s + (parseFloat(e[m.key]) || 0), 0);
-        if (sum) week.metrics[dailyForm.platform][m.key] = sum;
-      });
-      c.dailyLog.push({ id: uid(), date: new Date().toISOString().slice(0, 10), ...dailyForm });
+      c.dailyLog.push(entry);
+      const w = c.weeks.find((w) => w.id === week.id);
+      w.metrics[platform] = { ...w.metrics[platform], ...totals };
       return c;
     });
-    setDailyForm({ platform: dailyForm.platform, ...emptyMetrics() });
+    setDailyForm({ platform, ...emptyMetrics() });
   }
 
-  function addInspiration() {
+  async function addInspiration() {
     if (!inspForm.link.trim()) return;
-    updateClient(client.id, (c) => { c.inspiration.unshift({ id: uid(), favorite: false, ...inspForm }); return c; });
+    const post = await storage.addInspiration(client.id, inspForm);
+    updateClient(client.id, (c) => { c.inspiration.unshift(post); return c; });
     setInspForm({ link: "", likes: "", comments: "", reposts: "", caption: "" });
   }
 
-  function toggleFavorite(id) {
-    updateClient(client.id, (c) => { c.inspiration.find((i) => i.id === id).favorite ^= true; return c; });
+  async function toggleFavorite(id) {
+    const post = client.inspiration.find((i) => i.id === id);
+    const favorite = !post.favorite;
+    await storage.setFavorite(id, favorite);
+    updateClient(client.id, (c) => { c.inspiration.find((i) => i.id === id).favorite = favorite; return c; });
+  }
+
+  function setTrends(value) {
+    updateClient(client.id, (c) => { c.trends = value; return c; });
+    debouncedSave(`trends-${client.id}`, () => storage.updateClientText(client.id, { trends: value }));
   }
 
   async function generateReport() {
@@ -256,6 +250,7 @@ export default function App() {
       const insp = client.inspiration.slice(0, 8).map((i) => `Link: ${i.link} | Likes: ${i.likes || 0} | Comments: ${i.comments || 0} | Reposts: ${i.reposts || 0}${i.favorite ? " (favorited)" : ""}`).join("\n");
       const prompt = `You are a social media analyst for an event space marketing agency called EVA. Compare this client's current week performance against a set of top-performing event-space posts pulled from the niche for inspiration. Write a concise, direct report (under 250 words) covering: 1) where the client is under/over-performing vs the niche benchmarks, 2) the biggest gap, 3) one concrete recommendation. No fluff, no headers, plain prose.\n\nCLIENT (${client.name}) CURRENT WEEK:\n${clientData}\n\nNICHE INSPIRATION POSTS:\n${insp || "None provided yet."}`;
       const text = await callClaude(prompt);
+      await storage.updateClientText(client.id, { comparisonReport: text });
       updateClient(client.id, (c) => { c.comparisonReport = text; return c; });
     } catch (e) {
       updateClient(client.id, (c) => { c.comparisonReport = "Couldn't generate the report — try again."; return c; });
@@ -268,10 +263,30 @@ export default function App() {
     try {
       const prompt = `You run content strategy for an event space client called ${client.name} in the event-venue niche. Based on these current trend notes, generate 6 specific, ready-to-shoot content ideas (Reels/posts) tailored to an event space. Format as a tight numbered list, one line each, no preamble.\n\nTRENDS:\n${client.trends}`;
       const text = await callClaude(prompt);
+      await storage.updateClientText(client.id, { contentIdeas: text });
       updateClient(client.id, (c) => { c.contentIdeas = text; return c; });
     } catch (e) {
       updateClient(client.id, (c) => { c.contentIdeas = "Couldn't generate ideas — try again."; return c; });
     } finally { setIdeasLoading(false); }
+  }
+
+  if (!loaded) {
+    return (
+      <div className="min-h-screen w-full flex items-center justify-center" style={{ background: SURFACE.bg }}>
+        <Loader2 className="animate-spin" size={28} style={{ color: SURFACE.sub }} />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen w-full flex items-center justify-center p-6" style={{ background: SURFACE.bg }}>
+        <Card className="max-w-md p-6 text-center">
+          <p className="font-bold mb-2" style={{ color: SURFACE.text }}>Couldn't reach Supabase</p>
+          <p className="text-sm" style={{ color: SURFACE.sub }}>{loadError}</p>
+        </Card>
+      </div>
+    );
   }
 
   if (!client) return null;
@@ -364,7 +379,7 @@ export default function App() {
               inspForm={inspForm} setInspForm={setInspForm} addInspiration={addInspiration} toggleFavorite={toggleFavorite}
               generateReport={generateReport} reportLoading={reportLoading}
               generateIdeas={generateIdeas} ideasLoading={ideasLoading}
-              updateClient={updateClient}
+              setTrends={setTrends}
             />
           )}
         </div>
@@ -519,7 +534,7 @@ function TableView({ client, activePlatform, setActivePlatform, addWeek, setMetr
   );
 }
 
-function FeedView({ client, dailyForm, setDailyForm, pushDailyToCurrentWeek, inspForm, setInspForm, addInspiration, toggleFavorite, generateReport, reportLoading, generateIdeas, ideasLoading, updateClient }) {
+function FeedView({ client, dailyForm, setDailyForm, pushDailyToCurrentWeek, inspForm, setInspForm, addInspiration, toggleFavorite, generateReport, reportLoading, generateIdeas, ideasLoading, setTrends }) {
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       <Card className="p-5">
@@ -595,7 +610,7 @@ function FeedView({ client, dailyForm, setDailyForm, pushDailyToCurrentWeek, ins
 
       <Card className="p-5 mb-4">
         <h2 className="font-black text-sm uppercase tracking-wide mb-3" style={{ color: SURFACE.text }}>Trends &amp; content ideas</h2>
-        <textarea value={client.trends} onChange={(e) => updateClient(client.id, (c) => { c.trends = e.target.value; return c; })}
+        <textarea value={client.trends} onChange={(e) => setTrends(e.target.value)}
           placeholder="Paste what's trending on Instagram, TikTok, etc..." rows={3}
           className="w-full mb-3 rounded-lg px-3 py-2 text-sm outline-none" style={{ background: SURFACE.bg, border: `1px solid ${SURFACE.border}`, color: SURFACE.text }} />
         <button onClick={generateIdeas} disabled={ideasLoading} className="px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 disabled:opacity-50 mb-3" style={{ background: EVA.red, color: "#fff" }}>
