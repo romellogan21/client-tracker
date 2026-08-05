@@ -118,7 +118,7 @@ export default function App() {
   const [reportLoading, setReportLoading] = useState(false);
   const [ideasLoading, setIdeasLoading] = useState(false);
   const [dailyForm, setDailyForm] = useState({ platform: "Facebook", ...emptyMetrics() });
-  const [inspForm, setInspForm] = useState({ link: "", likes: "", comments: "", reposts: "", caption: "" });
+  const [inspForm, setInspForm] = useState({ link: "", likes: "", comments: "", reposts: "", views: "", caption: "" });
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const saveTimers = useRef({});
 
@@ -227,7 +227,7 @@ export default function App() {
     if (!inspForm.link.trim()) return;
     const post = await storage.addInspiration(client.id, inspForm);
     updateClient(client.id, (c) => { c.inspiration.unshift(post); return c; });
-    setInspForm({ link: "", likes: "", comments: "", reposts: "", caption: "" });
+    setInspForm({ link: "", likes: "", comments: "", reposts: "", views: "", caption: "" });
   }
 
   async function toggleFavorite(id) {
@@ -565,11 +565,12 @@ function FeedView({ client, dailyForm, setDailyForm, pushDailyToCurrentWeek, ins
       <Card className="p-5">
         <h2 className="font-black text-sm uppercase tracking-wide mb-1" style={{ color: SURFACE.text }}>Niche inspiration</h2>
         <p className="text-[11px] mb-3" style={{ color: SURFACE.sub }}>Manually entered by you for reference — links are never fetched or scraped by Claude.</p>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-2 mb-3">
           <input value={inspForm.link} onChange={(e) => setInspForm((f) => ({ ...f, link: e.target.value }))} placeholder="Post link" className="col-span-2 rounded-lg px-2 py-1.5 text-sm outline-none" style={{ background: SURFACE.bg, border: `1px solid ${SURFACE.border}`, color: SURFACE.text }} />
           <input value={inspForm.likes} onChange={(e) => setInspForm((f) => ({ ...f, likes: e.target.value }))} placeholder="Likes" className="rounded-lg px-2 py-1.5 text-sm outline-none" style={{ background: SURFACE.bg, border: `1px solid ${SURFACE.border}`, color: SURFACE.text }} />
           <input value={inspForm.comments} onChange={(e) => setInspForm((f) => ({ ...f, comments: e.target.value }))} placeholder="Comments" className="rounded-lg px-2 py-1.5 text-sm outline-none" style={{ background: SURFACE.bg, border: `1px solid ${SURFACE.border}`, color: SURFACE.text }} />
           <input value={inspForm.reposts} onChange={(e) => setInspForm((f) => ({ ...f, reposts: e.target.value }))} placeholder="Reposts" className="rounded-lg px-2 py-1.5 text-sm outline-none" style={{ background: SURFACE.bg, border: `1px solid ${SURFACE.border}`, color: SURFACE.text }} />
+          <input value={inspForm.views} onChange={(e) => setInspForm((f) => ({ ...f, views: e.target.value }))} placeholder="Views" className="rounded-lg px-2 py-1.5 text-sm outline-none" style={{ background: SURFACE.bg, border: `1px solid ${SURFACE.border}`, color: SURFACE.text }} />
         </div>
         <textarea value={inspForm.caption} onChange={(e) => setInspForm((f) => ({ ...f, caption: e.target.value }))} placeholder="Caption (paste manually)" rows={2}
           className="w-full mb-3 rounded-lg px-2 py-1.5 text-sm outline-none" style={{ background: SURFACE.bg, border: `1px solid ${SURFACE.border}`, color: SURFACE.text }} />
@@ -585,7 +586,7 @@ function FeedView({ client, dailyForm, setDailyForm, pushDailyToCurrentWeek, ins
               <div className="min-w-0 flex-1">
                 <a href={post.link} target="_blank" rel="noreferrer" className="text-sm font-semibold truncate block hover:underline" style={{ color: SURFACE.text }}>{post.link}</a>
                 <div className="flex gap-3 text-[11px] mt-0.5" style={{ color: SURFACE.sub }}>
-                  <span>{post.likes || 0} likes</span><span>{post.comments || 0} comments</span><span>{post.reposts || 0} reposts</span>
+                  <span>{post.likes || 0} likes</span><span>{post.comments || 0} comments</span><span>{post.reposts || 0} reposts</span><span>{post.views || 0} views</span>
                 </div>
                 {post.caption && <p className="text-xs mt-1 line-clamp-2" style={{ color: SURFACE.sub }}>{post.caption}</p>}
               </div>
