@@ -47,19 +47,15 @@ function weekGrade(week, prevWeek, platform) {
   return { grade: gradeForPct(avg), pct: avg };
 }
 
-async function callClaude(prompt) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+async function callBackend(path, body) {
+  const res = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1000,
-      messages: [{ role: "user", content: prompt }],
-    }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error("API error " + res.status);
   const data = await res.json();
-  return (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
+  return data.text;
 }
 
 function isLight(hex) {
@@ -248,8 +244,7 @@ export default function App() {
       const week = client.weeks[client.weeks.length - 1];
       const clientData = client.platforms.map((p) => `${p}: ${METRIC_DEFS.map((m) => `${m.label} ${week.metrics[p][m.key] || 0}`).join(", ")}`).join("\n");
       const insp = client.inspiration.slice(0, 8).map((i) => `Link: ${i.link} | Likes: ${i.likes || 0} | Comments: ${i.comments || 0} | Reposts: ${i.reposts || 0}${i.favorite ? " (favorited)" : ""}`).join("\n");
-      const prompt = `You are a social media analyst for an event space marketing agency called EVA. Compare this client's current week performance against a set of top-performing event-space posts pulled from the niche for inspiration. Write a concise, direct report (under 250 words) covering: 1) where the client is under/over-performing vs the niche benchmarks, 2) the biggest gap, 3) one concrete recommendation. No fluff, no headers, plain prose.\n\nCLIENT (${client.name}) CURRENT WEEK:\n${clientData}\n\nNICHE INSPIRATION POSTS:\n${insp || "None provided yet."}`;
-      const text = await callClaude(prompt);
+      const text = await callBackend("/api/comparison-report", { clientName: client.name, clientData, inspiration: insp });
       await storage.updateClientText(client.id, { comparisonReport: text });
       updateClient(client.id, (c) => { c.comparisonReport = text; return c; });
     } catch (e) {
@@ -261,8 +256,7 @@ export default function App() {
     if (!client.trends.trim()) return;
     setIdeasLoading(true);
     try {
-      const prompt = `You run content strategy for an event space client called ${client.name} in the event-venue niche. Based on these current trend notes, generate 6 specific, ready-to-shoot content ideas (Reels/posts) tailored to an event space. Format as a tight numbered list, one line each, no preamble.\n\nTRENDS:\n${client.trends}`;
-      const text = await callClaude(prompt);
+      const text = await callBackend("/api/content-ideas", { clientName: client.name, trends: client.trends });
       await storage.updateClientText(client.id, { contentIdeas: text });
       updateClient(client.id, (c) => { c.contentIdeas = text; return c; });
     } catch (e) {
