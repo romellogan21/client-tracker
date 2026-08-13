@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Star, Plus, TrendingUp, TrendingDown, Minus, Sparkles, X, Loader2, ChevronDown, Users, LayoutGrid, Rss, Menu } from "lucide-react";
+import { Star, Plus, TrendingUp, TrendingDown, Minus, Sparkles, X, Loader2, ChevronDown, Users, LayoutGrid, Rss, Menu, Pencil } from "lucide-react";
 import * as storage from "./storage";
 
 const EVA = { navy: "#0a0f2c", navyDeep: "#060a1f", white: "#ffffff", red: "#e5231b" };
@@ -185,6 +185,38 @@ export default function App() {
     setActivePlatform(name);
   }
 
+  async function deletePlatform(name) {
+    if (client.platforms.length <= 1) return;
+    const platforms = await storage.deletePlatform(client.id, name);
+    updateClient(client.id, (c) => {
+      c.platforms = platforms;
+      c.weeks.forEach((w) => { delete w.metrics[name]; });
+      c.dailyLog = c.dailyLog.filter((e) => e.platform !== name);
+      return c;
+    });
+    if (activePlatform === name) setActivePlatform(platforms[0]);
+    if (dailyForm.platform === name) setDailyForm({ platform: platforms[0], ...emptyMetrics() });
+  }
+
+  async function renamePlatform(oldName, newName) {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName || client.platforms.includes(trimmed)) return;
+    const platforms = await storage.renamePlatform(client.id, oldName, trimmed);
+    updateClient(client.id, (c) => {
+      c.platforms = platforms;
+      c.weeks.forEach((w) => {
+        if (oldName in w.metrics) {
+          w.metrics[trimmed] = w.metrics[oldName];
+          delete w.metrics[oldName];
+        }
+      });
+      c.dailyLog.forEach((e) => { if (e.platform === oldName) e.platform = trimmed; });
+      return c;
+    });
+    if (activePlatform === oldName) setActivePlatform(trimmed);
+    if (dailyForm.platform === oldName) setDailyForm((f) => ({ ...f, platform: trimmed }));
+  }
+
   async function createClient() {
     if (!newClientForm.name.trim()) return;
     const nc = await storage.createClient({ name: newClientForm.name.trim(), primary: newClientForm.primary, accent: newClientForm.accent });
@@ -365,7 +397,7 @@ export default function App() {
 
         <div className="p-4 md:p-8">
           {view === "table" ? (
-            <TableView client={client} activePlatform={activePlatform} setActivePlatform={setActivePlatform} addWeek={addWeek} setMetric={setMetric} addPlatform={addPlatform} />
+            <TableView client={client} activePlatform={activePlatform} setActivePlatform={setActivePlatform} addWeek={addWeek} setMetric={setMetric} addPlatform={addPlatform} deletePlatform={deletePlatform} renamePlatform={renamePlatform} />
           ) : (
             <FeedView
               client={client}
@@ -422,9 +454,12 @@ function StatCard({ label, value, sub, accent }) {
   );
 }
 
-function TableView({ client, activePlatform, setActivePlatform, addWeek, setMetric, addPlatform }) {
+function TableView({ client, activePlatform, setActivePlatform, addWeek, setMetric, addPlatform, deletePlatform, renamePlatform }) {
   const [addingPlatform, setAddingPlatform] = useState(false);
   const [platformName, setPlatformName] = useState("");
+  const [editingPlatform, setEditingPlatform] = useState(null);
+  const [editingName, setEditingName] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(null);
   const weeks = client.weeks;
   const latest = weeks[weeks.length - 1];
   const prevWeek = weeks.length > 1 ? weeks[weeks.length - 2] : null;
@@ -444,20 +479,59 @@ function TableView({ client, activePlatform, setActivePlatform, addWeek, setMetr
 
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
         <div className="flex gap-2 flex-wrap">
-          {client.platforms.map((p) => (
-            <button
-              key={p}
-              onClick={() => setActivePlatform(p)}
-              className="px-3.5 py-1.5 rounded-full text-xs font-bold uppercase tracking-wide border transition"
-              style={{
-                borderColor: activePlatform === p ? client.accent : SURFACE.border,
-                background: activePlatform === p ? client.accent : SURFACE.card,
-                color: activePlatform === p ? (isLight(client.accent) ? "#0a0a0a" : "#fff") : SURFACE.sub,
-              }}
-            >
-              {p}
-            </button>
-          ))}
+          {client.platforms.map((p) => {
+            const active = activePlatform === p;
+            const pillColor = active ? (isLight(client.accent) ? "#0a0a0a" : "#fff") : SURFACE.sub;
+            const isEditing = editingPlatform === p;
+            return (
+              <div
+                key={p}
+                className="group flex items-center gap-1 pl-3.5 pr-1.5 py-1.5 rounded-full text-xs font-bold uppercase tracking-wide border transition"
+                style={{
+                  borderColor: active ? client.accent : SURFACE.border,
+                  background: active ? client.accent : SURFACE.card,
+                  color: pillColor,
+                }}
+              >
+                {isEditing ? (
+                  <input
+                    autoFocus
+                    value={editingName}
+                    onChange={(e) => setEditingName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") { renamePlatform(p, editingName); setEditingPlatform(null); }
+                      if (e.key === "Escape") setEditingPlatform(null);
+                    }}
+                    onBlur={() => { renamePlatform(p, editingName); setEditingPlatform(null); }}
+                    className="bg-transparent outline-none w-20 text-xs font-bold uppercase tracking-wide"
+                    style={{ color: pillColor }}
+                  />
+                ) : (
+                  <button onClick={() => setActivePlatform(p)} className="bg-transparent">{p}</button>
+                )}
+                {!isEditing && (
+                  <>
+                    <button
+                      onClick={() => { setEditingPlatform(p); setEditingName(p); }}
+                      aria-label={`Rename ${p}`}
+                      className="opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+                    >
+                      <Pencil size={11} />
+                    </button>
+                    {client.platforms.length > 1 && (
+                      <button
+                        onClick={() => setConfirmDelete(p)}
+                        aria-label={`Remove ${p}`}
+                        className="opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })}
           {addingPlatform ? (
             <div className="flex items-center gap-1">
               <input
@@ -524,6 +598,25 @@ function TableView({ client, activePlatform, setActivePlatform, addWeek, setMetr
         </div>
       </Card>
       <p className="text-[11px] mt-3" style={{ color: SURFACE.sub }}>Newest week sits on the left — table reads right to left. Edit the current week directly, or log day-by-day from the Feed tab and push totals in.</p>
+
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <Card className="w-full max-w-sm p-5">
+            <h3 className="font-bold mb-2" style={{ color: SURFACE.text }}>Remove {confirmDelete}?</h3>
+            <p className="text-sm mb-4" style={{ color: SURFACE.sub }}>This will delete all {confirmDelete} data for every week.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmDelete(null)} className="flex-1 py-2 rounded-lg font-bold text-sm border" style={{ borderColor: SURFACE.border, color: SURFACE.text }}>Cancel</button>
+              <button
+                onClick={() => { deletePlatform(confirmDelete); setConfirmDelete(null); }}
+                className="flex-1 py-2 rounded-lg font-bold text-sm"
+                style={{ background: EVA.red, color: "#fff" }}
+              >
+                Remove
+              </button>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

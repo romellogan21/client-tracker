@@ -156,6 +156,54 @@ export async function setPlatforms(clientId, platforms) {
   if (error) throw error;
 }
 
+async function getWeekIds(db, clientId) {
+  const { data, error } = await db.from("weeks").select("id").eq("client_id", clientId);
+  if (error) throw error;
+  return (data || []).map((w) => w.id);
+}
+
+export async function deletePlatform(clientId, platform) {
+  const db = requireSupabase();
+  const { data: clientRow, error: fetchError } = await db.from("clients").select("platforms").eq("id", clientId).single();
+  if (fetchError) throw fetchError;
+  const platforms = (clientRow.platforms || []).filter((p) => p !== platform);
+
+  const weekIds = await getWeekIds(db, clientId);
+  if (weekIds.length) {
+    const { error: metricsError } = await db.from("metrics").delete().in("week_id", weekIds).eq("platform", platform);
+    if (metricsError) throw metricsError;
+  }
+
+  const { error: dailyError } = await db.from("daily_logs").delete().eq("client_id", clientId).eq("platform", platform);
+  if (dailyError) throw dailyError;
+
+  const { error: updateError } = await db.from("clients").update({ platforms }).eq("id", clientId);
+  if (updateError) throw updateError;
+
+  return platforms;
+}
+
+export async function renamePlatform(clientId, oldName, newName) {
+  const db = requireSupabase();
+  const { data: clientRow, error: fetchError } = await db.from("clients").select("platforms").eq("id", clientId).single();
+  if (fetchError) throw fetchError;
+  const platforms = (clientRow.platforms || []).map((p) => (p === oldName ? newName : p));
+
+  const weekIds = await getWeekIds(db, clientId);
+  if (weekIds.length) {
+    const { error: metricsError } = await db.from("metrics").update({ platform: newName }).in("week_id", weekIds).eq("platform", oldName);
+    if (metricsError) throw metricsError;
+  }
+
+  const { error: dailyError } = await db.from("daily_logs").update({ platform: newName }).eq("client_id", clientId).eq("platform", oldName);
+  if (dailyError) throw dailyError;
+
+  const { error: updateError } = await db.from("clients").update({ platforms }).eq("id", clientId);
+  if (updateError) throw updateError;
+
+  return platforms;
+}
+
 export async function logDailyEntry(clientId, platform, metrics) {
   const db = requireSupabase();
   const { data: logRow, error: logError } = await db
