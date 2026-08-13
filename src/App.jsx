@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Star, Plus, TrendingUp, TrendingDown, Minus, Sparkles, X, Loader2, ChevronDown, Users, LayoutGrid, Rss, Menu, Pencil } from "lucide-react";
+import { Star, Plus, TrendingUp, TrendingDown, Minus, Sparkles, X, Loader2, ChevronDown, Users, LayoutGrid, Rss, Menu, Pencil, ThumbsUp, ThumbsDown, Check, Trash2 } from "lucide-react";
 import * as storage from "./storage";
 
 const EVA = { navy: "#0a0f2c", navyDeep: "#060a1f", white: "#ffffff", red: "#e5231b" };
@@ -265,6 +265,25 @@ export default function App() {
     updateClient(client.id, (c) => { c.inspiration.find((i) => i.id === id).favorite = favorite; return c; });
   }
 
+  async function setInspirationReaction(id, reaction) {
+    const post = client.inspiration.find((i) => i.id === id);
+    const next = post.reaction === reaction ? null : reaction;
+    await storage.setReaction(id, next);
+    updateClient(client.id, (c) => { c.inspiration.find((i) => i.id === id).reaction = next; return c; });
+  }
+
+  async function toggleInspirationCompleted(id) {
+    const post = client.inspiration.find((i) => i.id === id);
+    const completed = !post.completed;
+    await storage.setCompleted(id, completed);
+    updateClient(client.id, (c) => { c.inspiration.find((i) => i.id === id).completed = completed; return c; });
+  }
+
+  async function deleteInspiration(id) {
+    await storage.deleteInspiration(id);
+    updateClient(client.id, (c) => { c.inspiration = c.inspiration.filter((i) => i.id !== id); return c; });
+  }
+
   function setTrends(value) {
     updateClient(client.id, (c) => { c.trends = value; return c; });
     debouncedSave(`trends-${client.id}`, () => storage.updateClientText(client.id, { trends: value }));
@@ -403,6 +422,7 @@ export default function App() {
               client={client}
               dailyForm={dailyForm} setDailyForm={setDailyForm} pushDailyToCurrentWeek={pushDailyToCurrentWeek}
               inspForm={inspForm} setInspForm={setInspForm} addInspiration={addInspiration} toggleFavorite={toggleFavorite}
+              setInspirationReaction={setInspirationReaction} toggleInspirationCompleted={toggleInspirationCompleted} deleteInspiration={deleteInspiration}
               generateReport={generateReport} reportLoading={reportLoading}
               generateIdeas={generateIdeas} ideasLoading={ideasLoading}
               setTrends={setTrends}
@@ -621,7 +641,8 @@ function TableView({ client, activePlatform, setActivePlatform, addWeek, setMetr
   );
 }
 
-function FeedView({ client, dailyForm, setDailyForm, pushDailyToCurrentWeek, inspForm, setInspForm, addInspiration, toggleFavorite, generateReport, reportLoading, generateIdeas, ideasLoading, setTrends }) {
+function FeedView({ client, dailyForm, setDailyForm, pushDailyToCurrentWeek, inspForm, setInspForm, addInspiration, toggleFavorite, setInspirationReaction, toggleInspirationCompleted, deleteInspiration, generateReport, reportLoading, generateIdeas, ideasLoading, setTrends }) {
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       <Card className="p-5">
@@ -666,16 +687,35 @@ function FeedView({ client, dailyForm, setDailyForm, pushDailyToCurrentWeek, ins
         <div className="space-y-2">
           {client.inspiration.length === 0 && <p className="text-xs" style={{ color: SURFACE.sub }}>No inspiration posts yet.</p>}
           {client.inspiration.map((post) => (
-            <div key={post.id} className="flex items-start gap-3 p-3 rounded-xl" style={{ border: `1px solid ${SURFACE.border}` }}>
-              <button onClick={() => toggleFavorite(post.id)} className="mt-0.5 shrink-0">
-                <Star size={18} fill={post.favorite ? "#f2c94c" : "none"} color={post.favorite ? "#f2c94c" : "#c8cad6"} />
-              </button>
+            <div key={post.id} className="flex items-start gap-3 p-3 rounded-xl transition-opacity" style={{ border: `1px solid ${SURFACE.border}`, opacity: post.completed ? 0.55 : 1 }}>
               <div className="min-w-0 flex-1">
-                <a href={post.link} target="_blank" rel="noreferrer" className="text-sm font-semibold truncate block hover:underline" style={{ color: SURFACE.text }}>{post.link}</a>
+                <div className="flex items-center gap-2">
+                  <a href={post.link} target="_blank" rel="noreferrer" className="text-sm font-semibold truncate block hover:underline" style={{ color: SURFACE.text }}>{post.link}</a>
+                  {post.completed && (
+                    <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0" style={{ background: SURFACE.bg, color: SURFACE.sub }}>Done</span>
+                  )}
+                </div>
                 <div className="flex gap-3 text-[11px] mt-0.5" style={{ color: SURFACE.sub }}>
                   <span>{post.likes || 0} likes</span><span>{post.comments || 0} comments</span><span>{post.reposts || 0} reposts</span><span>{post.views || 0} views</span>
                 </div>
                 {post.caption && <p className="text-xs mt-1 line-clamp-2" style={{ color: SURFACE.sub }}>{post.caption}</p>}
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button onClick={() => toggleFavorite(post.id)} title="Favorite" aria-label="Favorite">
+                  <Star size={16} fill={post.favorite ? "#f2c94c" : "none"} color={post.favorite ? "#f2c94c" : "#c8cad6"} />
+                </button>
+                <button onClick={() => setInspirationReaction(post.id, "up")} title="Worth modeling" aria-label="Thumbs up">
+                  <ThumbsUp size={16} fill={post.reaction === "up" ? "#2f9e44" : "none"} color={post.reaction === "up" ? "#2f9e44" : "#c8cad6"} />
+                </button>
+                <button onClick={() => setInspirationReaction(post.id, "down")} title="Not worth modeling" aria-label="Thumbs down">
+                  <ThumbsDown size={16} fill={post.reaction === "down" ? "#e03131" : "none"} color={post.reaction === "down" ? "#e03131" : "#c8cad6"} />
+                </button>
+                <button onClick={() => toggleInspirationCompleted(post.id)} title={post.completed ? "Mark not done" : "Mark done"} aria-label="Toggle done">
+                  <Check size={16} color={post.completed ? "#2f9e44" : "#c8cad6"} strokeWidth={post.completed ? 3 : 2} />
+                </button>
+                <button onClick={() => setConfirmDeleteId(post.id)} title="Delete" aria-label="Delete post">
+                  <Trash2 size={16} color="#c8cad6" />
+                </button>
               </div>
             </div>
           ))}
@@ -706,6 +746,25 @@ function FeedView({ client, dailyForm, setDailyForm, pushDailyToCurrentWeek, ins
         </button>
         {client.contentIdeas && <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: SURFACE.text }}>{client.contentIdeas}</p>}
       </Card>
+
+      {confirmDeleteId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <Card className="w-full max-w-sm p-5">
+            <h3 className="font-bold mb-2" style={{ color: SURFACE.text }}>Delete this inspiration post?</h3>
+            <p className="text-sm mb-4" style={{ color: SURFACE.sub }}>This can't be undone.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmDeleteId(null)} className="flex-1 py-2 rounded-lg font-bold text-sm border" style={{ borderColor: SURFACE.border, color: SURFACE.text }}>Cancel</button>
+              <button
+                onClick={() => { deleteInspiration(confirmDeleteId); setConfirmDeleteId(null); }}
+                className="flex-1 py-2 rounded-lg font-bold text-sm"
+                style={{ background: EVA.red, color: "#fff" }}
+              >
+                Delete
+              </button>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

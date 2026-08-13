@@ -40,6 +40,8 @@ function inspirationRowToPost(row) {
     views: row.views ?? "",
     caption: row.caption ?? "",
     favorite: row.favorite,
+    reaction: row.reaction ?? null,
+    completed: row.completed ?? false,
   };
 }
 
@@ -78,7 +80,7 @@ const CLIENT_SELECT = `
   id, name, primary_color, accent, platforms, trends, content_ideas, comparison_report, created_at,
   weeks ( id, label, position, metrics ( platform, metric_key, value ) ),
   daily_logs ( id, log_date, platform, created_at, daily_log_metrics ( metric_key, value ) ),
-  inspiration_posts ( id, link, likes, comments, reposts, views, caption, favorite, created_at )
+  inspiration_posts ( id, link, likes, comments, reposts, views, caption, favorite, reaction, completed, created_at )
 `;
 
 export async function fetchClients() {
@@ -237,6 +239,8 @@ export async function addInspiration(clientId, insp) {
       views: insp.views === "" ? null : parseFloat(insp.views),
       caption: insp.caption || null,
       favorite: false,
+      reaction: null,
+      completed: false,
     })
     .select()
     .single();
@@ -247,6 +251,24 @@ export async function addInspiration(clientId, insp) {
 export async function setFavorite(postId, favorite) {
   const db = requireSupabase();
   const { error } = await db.from("inspiration_posts").update({ favorite }).eq("id", postId);
+  if (error) throw error;
+}
+
+export async function setReaction(postId, reaction) {
+  const db = requireSupabase();
+  const { error } = await db.from("inspiration_posts").update({ reaction }).eq("id", postId);
+  if (error) throw error;
+}
+
+export async function setCompleted(postId, completed) {
+  const db = requireSupabase();
+  const { error } = await db.from("inspiration_posts").update({ completed }).eq("id", postId);
+  if (error) throw error;
+}
+
+export async function deleteInspiration(postId) {
+  const db = requireSupabase();
+  const { error } = await db.from("inspiration_posts").delete().eq("id", postId);
   if (error) throw error;
 }
 
